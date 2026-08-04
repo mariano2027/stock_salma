@@ -9,6 +9,13 @@ st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
 # Nombre del archivo fijo en la carpeta
 ARCHIVO_FIJO = "inventario.xlsx"
 
+# --- NUEVA FUNCIÓN CON CACHÉ AUTOMÁTICO ---
+# ttl=10 le dice a Streamlit que refresque el archivo cada 10 segundos si detecta cambios
+@st.cache_data(ttl=10)
+def cargar_inventario(ruta_archivo):
+    return pd.read_excel(ruta_archivo)
+# ------------------------------------------
+
 # Inicializar estados para los filtros si no existen
 if "prod_query" not in st.session_state:
     st.session_state.prod_query = ""
@@ -23,8 +30,11 @@ def limpiar_filtros():
 # Verificar si el archivo existe en la carpeta
 if os.path.exists(ARCHIVO_FIJO):
     try:
-        # Leer archivo y normalizar nombres de columnas a minúsculas
-        df = pd.read_excel(ARCHIVO_FIJO)
+        # LLAMADO A LA NUEVA FUNCIÓN (Reemplaza a pd.read_excel directo)
+        df = cargar_inventario(ARCHIVO_FIJO)
+        
+        # Clonamos el DataFrame para no modificar el caché en memoria al normalizar columnas
+        df = df.copy()
         df.columns = df.columns.str.strip()
         columnas_originales = list(df.columns)
         

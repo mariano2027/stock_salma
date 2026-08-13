@@ -3,6 +3,8 @@ import pandas as pd
 import io
 import os
 import time
+from datetime import datetime
+import pytz
 
 st.set_page_config(page_title="Filtro de Inventario - Stock Salma", layout="wide")
 st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
@@ -11,12 +13,11 @@ st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
 ARCHIVO_FIJO = "inventario.xlsx"
 
 # --- FUNCIÓN LECTURA CON TRUCO DE CACHÉ FORZADO ---
-# Usamos un marcador de tiempo (parámetro secreto) que cambia constantemente
 @st.cache_data(ttl=5)
 def cargar_inventario_seguro(ruta_archivo, marcador_tiempo):
     return pd.read_excel(ruta_archivo)
 
-# Creamos un identificador único basado en los minutos actuales para refrescar la memoria
+# Creamos un identificador único basado en la hora UTC actual para refrescar la memoria
 marcador_actual = time.strftime("%Y%m%d-%H%M")
 
 # Inicializar estados para los filtros si no existen
@@ -47,10 +48,12 @@ if os.path.exists(ARCHIVO_FIJO):
         # Validar columnas requeridas
         if 'producto' in mapeo_columnas and 'descripcion' in mapeo_columnas and 'stock' in mapeo_columnas:
             
-            # --- CARTEL DE FECHA ACTUAL ---
-            # Le avisa al usuario que los datos mostrados están procesados en vivo en este minuto
-            hora_sistema = time.strftime("%d/%m/%Y a las %H:%M hs")
-            st.info(f"🕒 **Panel conectado al Excel en vivo.** Información sincronizada al {hora_sistema} (Hora de Argentina).")
+            # --- CORRECCIÓN DE HORA EN VIVO (ZONA HORARIA ARGENTINA) ---
+            zona_horaria = pytz.timezone('America/Argentina/Buenos_Aires')
+            hora_local = datetime.now(zona_horaria)
+            hora_formateada = hora_local.strftime("%d/%m/%Y a las %H:%M hs")
+            
+            st.info(f"🕒 **Panel conectado al Excel en vivo.** Información sincronizada al {hora_formateada} (Hora de Argentina).")
             
             # Crear tres columnas visuales para los inputs y el botón de reset
             col1, col2, col3 = st.columns(3)
@@ -100,3 +103,4 @@ if os.path.exists(ARCHIVO_FIJO):
         st.error(f"Error al procesar el archivo base: {e}")
 else:
     st.error(f"⚠️ No se encontró el archivo '{ARCHIVO_FIJO}' en la carpeta del proyecto. Por favor, subilo a tu repositorio de GitHub junto con el código.")
+

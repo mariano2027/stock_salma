@@ -1,71 +1,44 @@
 import streamlit as st
 import pandas as pd
 import io
-import requests
-from datetime import datetime
-import pytz
 
 st.set_page_config(page_title="Filtro de Inventario - Stock Salma", layout="wide")
 st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
 
 # --- CONEXIÓN DIRECTA A TU GOOGLE SHEETS ---
 ID_PLANILLA = "1HeuyCFLjANNG7huXZHSWJ9iKAGiqlWvBeMYXk06iSZ0"
-LINK_EXCEL = f"https://docs.google.com/spreadsheets/d/{ID_PLANILLA}/export?format=xlsx"
+LINK_EXCEL = f"https://google.com{ID_PLANILLA}/export?format=xlsx"
 
-# --- FUNCIÓN PARA OBTENER LA FECHA DE ACTUALIZACIÓN DESDE GOOGLE DRIVE ---
-def obtener_fecha_sheets(id_doc):
-    # Usamos la API pública de Drive para ver la última modificación de la planilla
-    api_url = f"https://googleapis.com{id_doc}?fields=modifiedTime"
-    try:
-        response = requests.get(api_url)
-        if response.status_code == 200:
-            fecha_iso = response.json().get("modifiedTime")
-            if fecha_iso:
-                # Quitamos la 'Z' final si existe y parseamos la fecha UTC
-                fecha_clean = fecha_iso.replace("Z", "")
-                fecha_utc = datetime.fromisoformat(fecha_clean[:19])
-                
-                # Configuramos la zona horaria de Argentina
-                zona_horaria = pytz.timezone('America/Buenos_Aires')
-                fecha_local = fecha_utc.replace(tzinfo=pytz.utc).astimezone(zona_horaria)
-                return fecha_local.strftime("%d/%m/%Y a las %H:%M hs")
-        return "Fecha no disponible"
-    except Exception:
-        return "Error al leer actualización"
-
-# --- FUNCIÓN DE CARGA CON CACHÉ DE TIEMPO BAJO (10 SEGUNDOS) ---
+# --- FUNCIÓN DE CARGA GENERAL CON CACHÉ DE 10 SEGUNDOS ---
 @st.cache_data(ttl=10)
-def cargar_inventario(url_planilla):
+def cargar_inventario_completo(url_planilla):
     return pd.read_excel(url_planilla)
 
-# Inicializar estados para los filtros si no existen
-if "prod_query" not in st.session_state:
-    st.session_state.prod_query = ""
-if "desc_query" not in st.session_state:
-    st.session_state.desc_query = ""
-
-# Función para limpiar los filtros
-def limpiar_filtros():
-    st.session_state.prod_query = ""
-    st.session_state.desc_query = ""
-
 try:
-    # LLAMADO A LA FUNCIÓN EN VIVO
-    df = cargar_inventario(LINK_EXCEL)
+    # Traemos los datos completos desde la hoja de Google
+    df_raw = cargar_inventario_completo(LINK_EXCEL)
     
-    # Clonamos el DataFrame para no modificar el caché en memoria al normalizar columnas
-    df = df.copy()
+    # Clonamos para manipulación de filtros
+    df = df_raw.copy()
     df.columns = df.columns.str.strip()
     columnas_originales = list(df.columns)
     
-    # Diccionario para mapear minúsculas con los nombres reales
+    # Diccionario para mapear nombres reales de columnas en minúsculas
     mapeo_columnas = {col.lower(): col for col in columnas_originales}
     
-    # Validar columnas requeridas
+    # Validar las columnas requeridas del stock
     if 'producto' in mapeo_columnas and 'descripcion' in mapeo_columnas and 'stock' in mapeo_columnas:
         
-        # --- MOSTRAR FECHA AUTOMÁTICA EN TIEMPO REAL ---
-        fecha_act = obtener_sheets_date = obtener_fecha_sheets(ID_PLANILLA)
+        # --- LECTURA INTELIGENTE DE FECHA (CELDA E2 / Fila 0, Columna 4) ---
+        try:
+            # Captura el valor que escribas en la celda E2 de tu Google Sheets
+            fecha_act = str(df_raw.iloc[0, 4]).strip()
+            if fecha_act == "nan" or fecha_act == "":
+                fecha_act = "No especificada en planilla"
+        except Exception:
+            fecha_act = "Verificar celda E2 de la planilla"
+            
+        # Desplegar banner informativo con la fecha real ingresada
         st.info(f"🕒 **Última actualización del stock:** {fecha_act} (Hora de Argentina)")
         
         # Crear tres columnas visuales para los inputs y el botón de reset
@@ -87,7 +60,9 @@ try:
         filtro_prod = df[col_prod_real].astype(str).str.contains(buscar_producto, case=False, na=False)
         filtro_desc = df[col_desc_real].astype(str).str.contains(buscar_desc, case=False, na=False)
         
-        df_filtrado = df[filtro_prod & filtro_desc]
+        # Filtrar stock (eliminando columnas extras de control como la E y la F si existieran)
+        columnas_visibles = [mapeo_columnas['producto'], mapeo_columnas['descripcion'], mapeo_columnas['stock']]
+        df_filtrado = df.loc[filtro_prod & filtro_desc, columnas_visibles]
         
         # Mostrar métricas y la tabla de resultados
         st.subheader(f"Resultados encontrados: {len(df_filtrado)}")

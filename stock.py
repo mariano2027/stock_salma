@@ -2,19 +2,54 @@ import streamlit as st
 import pandas as pd
 import io
 import os
+import requests
+from datetime import datetime
+import pytz
 
 st.set_page_config(page_title="Filtro de Inventario - Stock Salma", layout="wide")
 st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
 
+# --- CONFIGURACIÓN DE GITHUB ---
+USUARIO_GITHUB = "mariano2027"
+REPOSITORIO_GITHUB = "stock_salma"
+# --------------------------------------------------------
+
 # Nombre del archivo fijo en la carpeta
 ARCHIVO_FIJO = "inventario.xlsx"
 
-# --- NUEVA FUNCIÓN CON CACHÉ AUTOMÁTICO ---
-# ttl=10 le dice a Streamlit que refresque el archivo cada 10 segundos si detecta cambios
+# --- FUNCIÓN PARA OBTENER LA FECHA DE ACTUALIZACIÓN DESDE GITHUB ---
+def obtener_fecha_actualizacion(owner, repo, path):
+    api_url = f"https://github.com{owner}/{repo}/commits?path={path}&page=1&per_page=1"
+    try:
+        response = requests.get(api_url)
+        if response.status_code == 200:
+            datos = response.json()
+            if datos:
+                fecha_iso = datos['commit']['committer']['date']
+                fecha_utc = datetime.strptime(fecha_iso, "%Y-%m-%dT%H:%M:%SZ")
+                # Configuramos la zona horaria de Argentina
+                zona_horaria = pytz.timezone('America/Buenos_Aires')
+                fecha_local = fecha_utc.replace(tzinfo=pytz.utc).astimezone(zona_horaria)
+                return fecha_local.strftime("%d/%m/%Y a las %H:%M hs")
+        return "Fecha no disponible"
+    except Exception:
+        return "Error al conectar con GitHub"
+
+# --- NUEVA FUNCIÓN CON CACHÉ INTELIGENTE ---
 @st.cache_data(ttl=10)
-def cargar_inventario(ruta_archivo):
+def cargar_inventario(ruta_archivo, commit_hash=None):
     return pd.read_excel(ruta_archivo)
 # ------------------------------------------
+
+# Obtener los datos del último commit en GitHub para romper el caché si el archivo cambió
+commit_actual = None
+try:
+    api_url_commit = f"https://github.com{USUARIO_GITHUB}/{REPOSITORIO_GITHUB}/commits?path={ARCHIVO_FIJO}&page=1&per_page=1"
+    res = requests.get(api_url_commit)
+    if res.status_code == 200 and res.json():
+        commit_actual = res.json()['sha']
+except Exception:
+    pass
 
 # Inicializar estados para los filtros si no existen
 if "prod_query" not in st.session_state:
@@ -30,8 +65,8 @@ def limpiar_filtros():
 # Verificar si el archivo existe en la carpeta
 if os.path.exists(ARCHIVO_FIJO):
     try:
-        # LLAMADO A LA NUEVA FUNCIÓN (Reemplaza a pd.read_excel directo)
-        df = cargar_inventario(ARCHIVO_FIJO)
+        # LLAMADO A LA FUNCIÓN (Pasamos commit_actual para forzar la actualización si el archivo cambió)
+        df = cargar_inventario(ARCHIVO_FIJO, commit_hash=commit_actual)
         
         # Clonamos el DataFrame para no modificar el caché en memoria al normalizar columnas
         df = df.copy()
@@ -43,6 +78,10 @@ if os.path.exists(ARCHIVO_FIJO):
         
         # Validar columnas requeridas
         if 'producto' in mapeo_columnas and 'descripcion' in mapeo_columnas and 'stock' in mapeo_columnas:
+            
+            # --- MOSTRAR FECHA DE ACTUALIZACIÓN ARRIBA DE LOS FILTROS ---
+            fecha_act = obtener_fecha_actualizacion(USUARIO_GITHUB, REPOSITORIO_GITHUB, ARCHIVO_FIJO)
+            st.info(f"🕒 **Última actualización del stock:** {fecha_act} (Hora de Argentina)")
             
             # Crear tres columnas visuales para los inputs y el botón de reset
             col1, col2, col3 = st.columns(3)

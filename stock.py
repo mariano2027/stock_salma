@@ -2,54 +2,40 @@ import streamlit as st
 import pandas as pd
 import io
 import os
-import requests
 from datetime import datetime
 import pytz
 
 st.set_page_config(page_title="Filtro de Inventario - Stock Salma", layout="wide")
 st.title("📦 Panel de Filtrado de Inventario - Stock Salma")
 
-# --- CONFIGURACIÓN DE GITHUB ---
-USUARIO_GITHUB = "mariano2027"
-REPOSITORIO_GITHUB = "stock_salma"
-# --------------------------------------------------------
-
 # Nombre del archivo fijo en la carpeta
 ARCHIVO_FIJO = "inventario.xlsx"
 
-# --- FUNCIÓN PARA OBTENER LA FECHA DE ACTUALIZACIÓN DESDE GITHUB ---
-def obtener_fecha_actualizacion(owner, repo, path):
-    api_url = f"https://github.com{owner}/{repo}/commits?path={path}&page=1&per_page=1"
+# --- FUNCIÓN LOCAL PARA LEER LA FECHA REAL DEL ARCHIVO ---
+def obtener_fecha_archivo_local(ruta):
     try:
-        response = requests.get(api_url)
-        if response.status_code == 200:
-            datos = response.json()
-            if datos:
-                fecha_iso = datos['commit']['committer']['date']
-                fecha_utc = datetime.strptime(fecha_iso, "%Y-%m-%dT%H:%M:%SZ")
-                # Configuramos la zona horaria de Argentina
-                zona_horaria = pytz.timezone('America/Buenos_Aires')
-                fecha_local = fecha_utc.replace(tzinfo=pytz.utc).astimezone(zona_horaria)
-                return fecha_local.strftime("%d/%m/%Y a las %H:%M hs")
-        return "Fecha no disponible"
+        # Obtenemos la fecha de última modificación física del archivo en el servidor
+        timestamp = os.path.getmtime(ruta)
+        fecha_utc = datetime.fromtimestamp(timestamp, tz=pytz.utc)
+        
+        # Configuramos la zona horaria de Argentina
+        zona_horaria = pytz.timezone('America/Buenos_Aires')
+        fecha_local = fecha_utc.astimezone(zona_horaria)
+        
+        return fecha_local.strftime("%d/%m/%Y a las %H:%M hs")
     except Exception:
-        return "Error al conectar con GitHub"
+        return "Fecha no disponible"
 
-# --- NUEVA FUNCIÓN CON CACHÉ INTELIGENTE ---
-@st.cache_data(ttl=10)
-def cargar_inventario(ruta_archivo, commit_hash=None):
-    return pd.read_excel(ruta_archivo)
-# ------------------------------------------
-
-# Obtener los datos del último commit en GitHub para romper el caché si el archivo cambió
-commit_actual = None
+# --- FUNCIÓN CON CACHÉ BASADO EN TIEMPO DE MODIFICACIÓN ---
+# Si la fecha de modificación física en el disco cambia, el caché se rompe solo
 try:
-    api_url_commit = f"https://github.com{USUARIO_GITHUB}/{REPOSITORIO_GITHUB}/commits?path={ARCHIVO_FIJO}&page=1&per_page=1"
-    res = requests.get(api_url_commit)
-    if res.status_code == 200 and res.json():
-        commit_actual = res.json()['sha']
+    mtime_clave = os.path.getmtime(ARCHIVO_FIJO)
 except Exception:
-    pass
+    mtime_clave = None
+
+@st.cache_data(ttl=10)
+def cargar_inventario(ruta_archivo, hash_modificacion=None):
+    return pd.read_excel(ruta_archivo)
 
 # Inicializar estados para los filtros si no existen
 if "prod_query" not in st.session_state:
@@ -65,8 +51,8 @@ def limpiar_filtros():
 # Verificar si el archivo existe en la carpeta
 if os.path.exists(ARCHIVO_FIJO):
     try:
-        # LLAMADO A LA FUNCIÓN (Pasamos commit_actual para forzar la actualización si el archivo cambió)
-        df = cargar_inventario(ARCHIVO_FIJO, commit_hash=commit_actual)
+        # Cargamos pasando el mtime_clave para asegurar actualización inmediata al reemplazar
+        df = cargar_inventario(ARCHIVO_FIJO, hash_modificacion=mtime_clave)
         
         # Clonamos el DataFrame para no modificar el caché en memoria al normalizar columnas
         df = df.copy()
@@ -79,8 +65,8 @@ if os.path.exists(ARCHIVO_FIJO):
         # Validar columnas requeridas
         if 'producto' in mapeo_columnas and 'descripcion' in mapeo_columnas and 'stock' in mapeo_columnas:
             
-            # --- MOSTRAR FECHA DE ACTUALIZACIÓN ARRIBA DE LOS FILTROS ---
-            fecha_act = obtener_fecha_actualizacion(USUARIO_GITHUB, REPOSITORIO_GITHUB, ARCHIVO_FIJO)
+            # --- MOSTRAR FECHA EXTRAÍDA DIRECTAMENTE DEL ARCHIVO LOCAL ---
+            fecha_act = obtener_fecha_archivo_local(ARCHIVO_FIJO)
             st.info(f"🕒 **Última actualización del stock:** {fecha_act} (Hora de Argentina)")
             
             # Crear tres columnas visuales para los inputs y el botón de reset
@@ -131,3 +117,4 @@ if os.path.exists(ARCHIVO_FIJO):
         st.error(f"Error al procesar el archivo base: {e}")
 else:
     st.error(f"⚠️ No se encontró el archivo '{ARCHIVO_FIJO}' en la carpeta del proyecto. Por favor, subilo a tu repositorio de GitHub junto con el código.")
+
